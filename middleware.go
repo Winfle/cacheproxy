@@ -1,4 +1,4 @@
-package middleware
+package cacheproxy
 
 import (
 	"net/http"
@@ -6,7 +6,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const PluginName = "middleware"
+const PluginName = "cacheproxy"
 
 var logger *zap.Logger
 
@@ -23,7 +23,6 @@ func (p *Plugin) Init() error {
 
 func (p *Plugin) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Info("Request")
 
 		next.ServeHTTP(w, r)
 	})
