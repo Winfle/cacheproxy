@@ -16,7 +16,7 @@ var logger *zap.Logger
 
 type Plugin struct{}
 
-var redisDns = "localhost:6389"
+var redisDns = "redis:6379"
 var cache *RedisClient
 
 var reqBuffer []byte
