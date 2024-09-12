@@ -1,62 +1,79 @@
 package cacheproxy
 
 import (
-	"bytes"
-	"fmt"
-	"io"
+	"context"
 	"net/http"
-	// "compress/gzip"
 
+	"github.com/roadrunner-server/errors"
 	"go.uber.org/zap"
 )
 
 const PluginName = "cacheproxy"
 
-var logger *zap.Logger
+type Plugin struct {
+	log       *zap.Logger
+	cfg       *Config
+	cancelCtx *context.CancelFunc
+	fsm       *FSM
+}
 
-type Plugin struct{}
+type Logger interface {
+	NamedLogger(name string) *zap.Logger
+}
 
-var redisDns = "redis:6379"
-var cache *RedisClient
+type Configurer interface {
+	// UnmarshalKey takes a single key and unmarshal it into a Struct.
+	UnmarshalKey(name string, out any) error
 
-var reqBuffer []byte
+	// Has checks if a config section exists.
+	Has(name string) bool
+}
 
-func (p *Plugin) Init() error {
-	fmt.Println("Instantiating ProxyCache middleware")
-	cache = InitRedisConnection(redisDns)
+func (p *Plugin) Init(l Logger, cfg Configurer) error {
+	logger := l.NamedLogger(PluginName)
+	p.log = logger
+
+	if !cfg.Has(PluginName) {
+		p.log.Warn("middleware is disabled")
+		return errors.E(errors.Disabled)
+	}
+
+	err := cfg.UnmarshalKey(PluginName, &p.cfg)
+	if err != nil {
+		p.log.Error("config is not set")
+		return errors.E(errors.Disabled)
+	}
+
+	p.log.Info("connecting to redis: " + p.cfg.RedisAddr)
+
+	ctx := context.Background()
+
+	rdsClient, initErr := initRedisConnection(p.cfg.RedisAddr, ctx)
+	if initErr != nil {
+		p.log.Error(initErr.Error())
+		return errors.E(errors.Disabled)
+	}
+
+	// Init FSM
+	p.fsm = &FSM{
+		rds: rdsClient,
+		log: logger,
+	}
+
+	return nil
+}
+
+func (p *Plugin) Stop() error {
+	(*p.cancelCtx)()
 
 	return nil
 }
 
 func (p *Plugin) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bodyBytes, _ := io.ReadAll(r.Body)
-		r.Body.Close()
+	p.fsm.next = next
 
-		hash := HashBytes(bodyBytes)
-
-		if cacheBody, _ := cache.Get(hash); cacheBody != "" {
-			fmt.Printf("HIT: %s\n", hash)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(200)
-			w.Write([]byte(cacheBody))
-			return
-		}
-		fmt.Printf("MISS: %s\n", hash)
-
-		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-		httpCtx := &HttpResponseCtx{
-			w: w,
-			h: make(http.Header),
-		}
-
-		next.ServeHTTP(httpCtx, r)
-		
-		ProcessCtx(hash, httpCtx)
-	})
+	return p.fsm
 }
-
 
 func (p *Plugin) Name() string {
 	return PluginName

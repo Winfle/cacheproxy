@@ -1,7 +1,10 @@
 package cacheproxy
 
-import "io"
-import "net/http"
+import (
+	"fmt"
+	"io"
+	"net/http"
+)
 
 type HttpResponseCtx struct {
 	io.ReadCloser
@@ -15,11 +18,10 @@ type HttpResponseCtx struct {
 	// TwoXXSent is true if the response headers with >= 2xx code were sent
 	// 1xx header might be sent unlimited number of times
 	wc bool
-	
-	body []byte
-	h http.Header
-}
 
+	body []byte
+	h    http.Header
+}
 
 // Ensure wrapper satisfies the http.ResponseWriter interface
 func (ctx *HttpResponseCtx) Header() http.Header {
@@ -47,7 +49,8 @@ func (ctx *HttpResponseCtx) WriteHeader(code int) {
 
 func (ctx *HttpResponseCtx) Write(data []byte) (int, error) {
 	ctx.write += len(data)
-	ctx.body  = append(ctx.body, data...)
+	fmt.Print("WRITING\n")
+	ctx.body = append(ctx.body, data...)
 
 	return ctx.w.Write(data)
 }

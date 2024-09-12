@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/redis/go-redis/v9"
+	"errors"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type RedisClient struct {
@@ -17,10 +19,9 @@ type RedisClient struct {
 const CACHE_TTL = 120 * time.Second
 
 var ctx context.Context
+var cancelCtx context.CancelFunc
 
-func InitRedisConnection(dns string) *RedisClient {
-	ctx = context.Background()
-
+func initRedisConnection(dns string, ctx context.Context) (*RedisClient, error) {
 	c := redis.NewClient(&redis.Options{
 		Addr:             dns,
 		Password:         "",
@@ -28,48 +29,45 @@ func InitRedisConnection(dns string) *RedisClient {
 		DisableIndentity: true,
 	})
 
+	connectionError := checkRedisAvailability(c, ctx)
+	if connectionError != nil {
+		return nil, connectionError
+	}
+
 	return &RedisClient{
 		ctx: ctx,
 		c:   c,
-	}
+	}, nil
 }
 
-func (r *RedisClient) Get(key string) (string, error) {
-	val, err := r.c.Get(ctx, key).Result()
+func checkRedisAvailability(c *redis.Client, ctx context.Context) error {
+	_, err := c.Ping(ctx).Result()
+	if err == nil {
+		return nil
+	}
+
+	e := fmt.Sprintf("redis instannce connection error: %v", err)
+	return errors.New(e)
+}
+
+func (p *Plugin) Weight() uint {
+	return 100
+}
+
+func (r *RedisClient) Get(key string) ([]byte, error) {
+	val, err := r.c.Get(r.ctx, key).Bytes()
 
 	if err == redis.Nil {
-		return "", nil
+		return nil, nil
 	} else if err != nil {
 		// Handle other Redis errors
 		log.Printf("Error fetching key %s: %v", key, err)
-		return "", err
+		return nil, err
 	}
 
 	return val, nil
 }
 
 func (r *RedisClient) Set(key string, v interface{}) {
-	r.c.Set(ctx, key, v, CACHE_TTL)
-}
-
-func Test(rdb *redis.Client) {
-	err := rdb.Set(ctx, "key", "value", 0).Err()
-	if err != nil {
-		panic(err)
-	}
-
-	val, err := rdb.Get(ctx, "key").Result()
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("key", val)
-
-	val2, err := rdb.Get(ctx, "key2").Result()
-	if err == redis.Nil {
-		fmt.Println("key2 does not exist")
-	} else if err != nil {
-		panic(err)
-	} else {
-		fmt.Println("key2", val2)
-	}
+	r.c.Set(r.ctx, key, v, CACHE_TTL)
 }
