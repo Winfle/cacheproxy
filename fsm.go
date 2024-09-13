@@ -85,14 +85,33 @@ type FSM struct {
 	beRespHeader http.Header
 }
 
+func (f FSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
+	reqBody, _ := io.ReadAll(r.Body)
+
+	r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(reqBody))
+
+	f.req = HttpPayload{
+		Body:   reqBody,
+		Method: r.Method,
+		Header: r.Header,
+	}
+
+	f.w = w
+	f.r = r
+
+	f.Recv()
+}
+
 func (f *FSM) Recv() {
+
 	var err error
 	hash := HashBytes(f.req.Body)
 
 	data, _ := f.rds.Get(hash)
 	if len(data) > 0 {
 		f.log.Info(fmt.Sprintf("HIT: %s", hash))
-
 		f.res, err = UnserializeHttpPayload(data)
 		if err == nil {
 			f.Deliver()
@@ -104,7 +123,7 @@ func (f *FSM) Recv() {
 	f.BackendCall()
 }
 
-func (f FSM) Deliver() {
+func (f *FSM) Deliver() {
 	// for name, values := range f.res.Header {
 	// 	for _, value := range values {
 	// 		f.w.Header().Set(name, value)
@@ -113,12 +132,13 @@ func (f FSM) Deliver() {
 
 	f.w.Header().Set("Content-Type", "application/json")
 	f.w.Header().Set("Server", "graphrunner-cacheproxy")
-	f.w.WriteHeader(200)
 
+	f.w.WriteHeader(200)
 	f.w.Write(f.res.Body)
+	return
 }
 
-func (f FSM) BackendCall() {
+func (f *FSM) BackendCall() {
 	beCtx := &HttpResponseCtx{
 		w: f.w,
 		h: make(http.Header),
@@ -144,13 +164,12 @@ func (f FSM) Hash() {
 	f.Cache()
 }
 
-func (f FSM) Cache() {
+func (f *FSM) Cache() {
 	if !f.cacheable {
 		return
 	}
 
 	hash := HashBytes(f.req.Body)
-
 	bytes, err := f.res.serialize()
 	if err != nil {
 		f.log.Error("Unable to serialize hash" + hash)
@@ -161,21 +180,5 @@ func (f FSM) Cache() {
 	f.log.Info("PUT: " + hash)
 }
 
-func (f *FSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
-	reqBody, _ := io.ReadAll(r.Body)
-
-	r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewReader(reqBody))
-
-	f.req = HttpPayload{
-		Body:   reqBody,
-		Method: r.Method,
-		Header: r.Header,
-	}
-
-	f.w = w
-	f.r = r
-
-	f.Recv()
-}
+var ww http.ResponseWriter
+var rr *http.Request

@@ -14,7 +14,7 @@ type Plugin struct {
 	log       *zap.Logger
 	cfg       *Config
 	cancelCtx *context.CancelFunc
-	fsm       *FSM
+	rds       *RedisClient
 }
 
 type Logger interface {
@@ -28,6 +28,9 @@ type Configurer interface {
 	// Has checks if a config section exists.
 	Has(name string) bool
 }
+
+var rdsClient *RedisClient
+var _logger *zap.Logger
 
 func (p *Plugin) Init(l Logger, cfg Configurer) error {
 	logger := l.NamedLogger(PluginName)
@@ -48,16 +51,11 @@ func (p *Plugin) Init(l Logger, cfg Configurer) error {
 
 	ctx := context.Background()
 
-	rdsClient, initErr := initRedisConnection(p.cfg.RedisAddr, ctx)
+	var initErr error
+	p.rds, initErr = initRedisConnection(p.cfg.RedisAddr, ctx)
 	if initErr != nil {
 		p.log.Error(initErr.Error())
 		return errors.E(errors.Disabled)
-	}
-
-	// Init FSM
-	p.fsm = &FSM{
-		rds: rdsClient,
-		log: logger,
 	}
 
 	return nil
@@ -70,9 +68,14 @@ func (p *Plugin) Stop() error {
 }
 
 func (p *Plugin) Middleware(next http.Handler) http.Handler {
-	p.fsm.next = next
 
-	return p.fsm
+	fsm := FSM{
+		rds:  p.rds,
+		log:  p.log,
+		next: next,
+	}
+
+	return fsm
 }
 
 func (p *Plugin) Name() string {
