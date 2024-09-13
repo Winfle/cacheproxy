@@ -25,7 +25,7 @@ func initRedisConnection(dns string, ctx context.Context) (*RedisClient, error) 
 	c := redis.NewClient(&redis.Options{
 		Addr:             dns,
 		Password:         "",
-		DB:               0,
+		DB:               6,
 		DisableIndentity: true,
 	})
 
