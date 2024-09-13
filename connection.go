@@ -18,7 +18,7 @@ type RedisClient struct {
 	c   *redis.Client
 }
 
-const CACHE_TTL = 120 * time.Second
+const CACHE_TTL = 3600 * time.Second
 
 var ctx context.Context
 var cancelCtx context.CancelFunc
