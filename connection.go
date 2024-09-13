@@ -2,8 +2,10 @@ package cacheproxy
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
+	"strings"
 
 	"errors"
 	"time"
@@ -22,11 +24,18 @@ var ctx context.Context
 var cancelCtx context.CancelFunc
 
 func initRedisConnection(dns string, ctx context.Context) (*RedisClient, error) {
+	if strings.HasPrefix(dns, "tls://") {
+		dns = strings.TrimPrefix(dns, "tls://")
+	}
+
 	c := redis.NewClient(&redis.Options{
 		Addr:             dns,
 		Password:         "",
 		DB:               6,
 		DisableIndentity: true,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true, // Use false in production to verify the certificate
+		},
 	})
 
 	connectionError := checkRedisAvailability(c, ctx)

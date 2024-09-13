@@ -58,6 +58,8 @@ func (p *Plugin) Init(l Logger, cfg Configurer) error {
 		return errors.E(errors.Disabled)
 	}
 
+	p.log.Info("connected")
+
 	return nil
 }
 
