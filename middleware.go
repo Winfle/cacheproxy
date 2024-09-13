@@ -1,31 +1,76 @@
 package cacheproxy
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/roadrunner-server/errors"
 	"go.uber.org/zap"
 )
 
 const PluginName = "cacheproxy"
 
-var logger *zap.Logger
+type Plugin struct {
+	log       *zap.Logger
+	cfg       *Config
+	cancelCtx *context.CancelFunc
+	rds       *RedisClient
+}
 
-type Plugin struct{}
+type Logger interface {
+	NamedLogger(name string) *zap.Logger
+}
 
-func (p *Plugin) Init() error {
-	logger := zap.Must(zap.NewProduction())
+type Configurer interface {
+	UnmarshalKey(name string, out any) error
 
-	defer logger.Sync()
+	Has(name string) bool
+}
 
-	logger.Info("Hello from Zap logger!")
+func (p *Plugin) Init(l Logger, cfg Configurer) error {
+	logger := l.NamedLogger(PluginName)
+	p.log = logger
+
+	if !cfg.Has(PluginName) {
+		p.log.Warn("middleware is disabled")
+		return errors.E(errors.Disabled)
+	}
+
+	err := cfg.UnmarshalKey(PluginName, &p.cfg)
+	if err != nil {
+		p.log.Error("config is not set")
+		return errors.E(errors.Disabled)
+	}
+
+	ctx := context.Background()
+
+	var initErr error
+	p.log.Info("connecting to redis instance: " + p.cfg.RedisAddr)
+	p.rds, initErr = initRedisConnection(p.cfg.RedisAddr, ctx)
+	if initErr != nil {
+		p.log.Error(initErr.Error())
+		return errors.E(errors.Disabled)
+	}
+
+	p.log.Info("connected")
+
+	return nil
+}
+
+func (p *Plugin) Stop() error {
+	(*p.cancelCtx)()
+
 	return nil
 }
 
 func (p *Plugin) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fsm := FSM{
+		rds:  p.rds,
+		log:  p.log,
+		next: next,
+	}
 
-		next.ServeHTTP(w, r)
-	})
+	return fsm
 }
 
 func (p *Plugin) Name() string {
