@@ -34,3 +34,14 @@ func DecompressGzip(gzipData []byte) ([]byte, error) {
 
 	return decompressedData.Bytes(), nil
 }
+
+func CompressGzip(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	writer := gzip.NewWriter(&buf)
+	_, err := writer.Write(data)
+	if err != nil {
+		return nil, err
+	}
+	writer.Close()
+	return buf.Bytes(), nil
+}

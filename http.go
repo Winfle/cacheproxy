@@ -31,18 +31,18 @@ func (h *HttpPayload) HashKey() string {
 }
 
 func (h *HttpPayload) serialize() ([]byte, error) {
-	p := HttpPayload{
-		Method: h.Method,
-		Body:   []byte(h.GetResponseBody()),
-		Header: h.Header,
-	}
-
-	j, err := json.Marshal(p)
+	compressedBody, err := CompressGzip([]byte(h.GetResponseBody()))
 	if err != nil {
 		return nil, err
 	}
 
-	return j, nil
+	p := HttpPayload{
+		Method: h.Method,
+		Body:   compressedBody,
+		Header: h.Header,
+	}
+
+	return json.Marshal(p)
 }
 
 func UnserializeHttpPayload(data []byte) (HttpPayload, error) {
@@ -51,6 +51,13 @@ func UnserializeHttpPayload(data []byte) (HttpPayload, error) {
 	if err != nil {
 		return HttpPayload{}, err
 	}
+
+	// Decompress the body
+	decompressedBody, err := DecompressGzip(p.Body)
+	if err != nil {
+		return HttpPayload{}, err
+	}
+	p.Body = decompressedBody
 
 	return p, nil
 }

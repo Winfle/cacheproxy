@@ -31,7 +31,6 @@ type FSM struct {
 }
 
 func (f FSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
 	f.startTime = time.Now()
 	reqBody, _ := io.ReadAll(r.Body)
 
@@ -55,47 +54,26 @@ func (f *FSM) Recv() {
 
 	data, err := f.rds.Get(hKey)
 	if err != nil {
-		f.log.Error("Error redis fetch: " + hKey + err.Error())
-		f.BackendCall()
+		f.log.Error(fmt.Sprintf("Error fetching from Redis for key %s: %v", hKey, err))
+		f.BackendCall() // Perform backend call if Redis fetch fails
 		return
 	}
 
-	if len(data) > 0 {
-		f.log.Info("HIT: " + hKey)
-
-		f.res, err = UnserializeHttpPayload(data)
-		if err == nil {
-			f.Deliver()
-			return
-		}
-		f.log.Error("Error deserealizing object: " + hKey + err.Error())
+	if len(data) == 0 {
+		f.log.Info("MISS: " + hKey)
+		f.BackendCall() // Perform backend call if data is empty
+		return
 	}
 
-	f.BackendCall()
-}
-
-func (f *FSM) Deliver() {
-	for name, values := range f.res.Header {
-		if name == "Content-Length" || name == "Transfer-Encoding" || name == "Content-Encoding" ||
-			name == "Connection" || name == "Date" {
-			continue
-		}
-
-		if len(values) > 1 {
-			concatenatedValues := strings.Join(values, ", ")
-			f.w.Header().Set(name, concatenatedValues)
-		} else if len(values) == 1 {
-			f.w.Header().Set(name, values[0])
-		}
+	f.log.Info(fmt.Sprintf("HIT: %s", hKey))
+	f.res, err = UnserializeHttpPayload(data)
+	if err != nil {
+		f.log.Error(fmt.Sprintf("Error deserializing data for key %s: %v", hKey, err))
+		f.BackendCall() // Perform backend call if deserialization fails
+		return
 	}
 
-	f.w.Header().Set("X-Server", "graphrunner-cacheproxy")
-	f.w.Header().Set("X-Cache", "HIT")
-	f.w.Header().Set("X-Elapsed", fmt.Sprintf("%vms", time.Since(f.startTime).Milliseconds()))
-
-	f.w.WriteHeader(200)
-	f.w.Write(f.res.Body)
-	return
+	f.DeliverCache()
 }
 
 func (f *FSM) BackendCall() {
@@ -114,21 +92,36 @@ func (f *FSM) BackendCall() {
 }
 
 func (f FSM) Hash() {
-	if f.req.Method == "POST" {
-		f.cacheable = true
-	} else {
-		f.cacheable = false
-	}
+	f.IsCache()
 
-	f.Cache()
+	if f.cacheable {
+		f.Cache()
+	}
 }
 
-func (f *FSM) Cache() {
-	if !f.cacheable {
+func (f *FSM) IsCache() {
+	if bytes.Contains(f.req.Body, []byte("mutation")) {
+		f.cacheable = false
 		return
 	}
 
+	if f.req.Method != "POST" {
+		f.cacheable = false
+		return
+	}
+
+	f.cacheable = true
+}
+
+func (f *FSM) Cache() {
 	hKey := f.req.HashKey()
+	for name, _ := range f.res.Header {
+		switch name {
+		case "Content-Length", "Transfer-Encoding", "Content-Encoding", "Connection", "Date":
+			f.res.Header.Del(name) // Remove auto-generated headers
+		}
+	}
+
 	bytes, err := f.res.serialize()
 	if err != nil {
 		f.log.Error("Unable to serialize hash" + hKey)
@@ -137,4 +130,24 @@ func (f *FSM) Cache() {
 
 	f.log.Info("PUT: " + hKey)
 	f.rds.Set(hKey, bytes)
+}
+
+func (f *FSM) DeliverCache() {
+	for name, values := range f.res.Header {
+		f.w.Header().Set(name, strings.Join(values, ", "))
+	}
+
+	xHeaders := map[string]string{
+		"X-Server":         "cacheproxy",
+		"X-Cache":          "HIT",
+		"Content-Encoding": "gzip",
+		"X-Elapsed":        fmt.Sprintf("%vms", time.Since(f.startTime).Milliseconds()),
+	}
+
+	for key, value := range xHeaders {
+		f.w.Header().Set(key, value)
+	}
+
+	f.w.WriteHeader(200)
+	f.w.Write(f.res.Body)
 }

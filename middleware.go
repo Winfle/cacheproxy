@@ -46,7 +46,7 @@ func (p *Plugin) Init(l Logger, cfg Configurer) error {
 
 	var initErr error
 	p.log.Info("connecting to redis instance: " + p.cfg.RedisAddr)
-	p.rds, initErr = initRedisConnection(p.cfg.RedisAddr, ctx)
+	p.rds, initErr = InitRedisConnection(p.cfg.RedisAddr, ctx)
 	if initErr != nil {
 		p.log.Error(initErr.Error())
 		return errors.E(errors.Disabled)

@@ -24,7 +24,7 @@ const REDIS_DB = 6
 var ctx context.Context
 var cancelCtx context.CancelFunc
 
-func initRedisConnection(dns string, ctx context.Context) (*RedisClient, error) {
+func InitRedisConnection(dns string, ctx context.Context) (*RedisClient, error) {
 	options := redis.Options{
 		Addr:     dns,
 		Password: "",
