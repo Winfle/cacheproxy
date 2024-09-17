@@ -80,6 +80,6 @@ func (r *RedisClient) Get(key string) ([]byte, error) {
 	return val, nil
 }
 
-func (r *RedisClient) Set(key string, v interface{}) {
-	r.c.Set(r.ctx, key, v, CACHE_TTL)
+func (r *RedisClient) Set(key string, v interface{}, ttl int) {
+	r.c.Set(r.ctx, key, v, time.Duration(ttl)*time.Second)
 }

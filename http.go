@@ -3,9 +3,12 @@ package cacheproxy
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 type HttpPayload struct {
+	Status int
 	Method string
 	Body   []byte      `json:"body"`
 	Header http.Header `json:"headers"`
@@ -30,7 +33,17 @@ func (h *HttpPayload) HashKey() string {
 	return store + ":" + hash
 }
 
-func (h *HttpPayload) serialize() ([]byte, error) {
+func (h *HttpPayload) RemovePayloadHeaders() {
+	for name, _ := range h.Header {
+		switch name {
+		case "Content-Length", "Transfer-Encoding", "Content-Encoding", "Connection", "Date":
+			h.Header.Del(name) // Remove auto-generated headers
+		}
+	}
+}
+
+func (h *HttpPayload) Serialize() ([]byte, error) {
+
 	compressedBody, err := CompressGzip([]byte(h.GetResponseBody()))
 	if err != nil {
 		return nil, err
@@ -60,4 +73,33 @@ func UnserializeHttpPayload(data []byte) (HttpPayload, error) {
 	p.Body = decompressedBody
 
 	return p, nil
+}
+
+func (p *HttpPayload) GetTTL() int {
+	cacheControl := p.Header.Get("Cache-Control")
+	if cacheControl == "" {
+		return 0
+	}
+
+	directives := strings.Split(cacheControl, ",")
+	for _, directive := range directives {
+		directive = strings.TrimSpace(directive)
+		if strings.HasPrefix(directive, "s-maxage=") {
+			sMaxAgeStr := strings.TrimPrefix(directive, "s-maxage=")
+			sMaxAge, err := strconv.Atoi(sMaxAgeStr)
+			if err == nil {
+				return sMaxAge
+			}
+		}
+
+		if strings.HasPrefix(directive, "max-age=") {
+			maxAgeStr := strings.TrimPrefix(directive, "max-age=")
+			maxAge, err := strconv.Atoi(maxAgeStr)
+			if err == nil {
+				return maxAge
+			}
+		}
+	}
+
+	return 0
 }

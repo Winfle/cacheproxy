@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const DEFAULT_TTL = 3600
+
 type FSM struct {
 	rds  *RedisClient
 	next http.Handler
@@ -20,6 +22,7 @@ type FSM struct {
 	r *http.Request
 
 	cacheable bool
+	ttl       int
 
 	req HttpPayload
 	res HttpPayload
@@ -85,6 +88,7 @@ func (f *FSM) BackendCall() {
 
 	f.next.ServeHTTP(beCtx, f.r)
 
+	f.res.Status = beCtx.code
 	f.res.Body = beCtx.body
 	f.res.Header = beCtx.h
 
@@ -92,44 +96,69 @@ func (f *FSM) BackendCall() {
 }
 
 func (f FSM) Hash() {
-	f.IsCache()
+	f.SetTTL()
+	f.Cacheable()
 
-	if f.cacheable {
-		f.Cache()
-	}
+	f.Cache()
 }
 
-func (f *FSM) IsCache() {
-	if bytes.Contains(f.req.Body, []byte("mutation")) {
-		f.cacheable = false
+func (f *FSM) Cacheable() {
+	f.cacheable = false
+
+	if f.ttl == 0 {
+		return
+	}
+
+	if f.res.Status != 200 {
 		return
 	}
 
 	if f.req.Method != "POST" {
-		f.cacheable = false
 		return
+	}
+
+	if bytes.Contains(f.req.Body, []byte("mutation")) {
+		return
+	}
+
+	cacheControl := f.res.Header.Get("Cache-Control")
+	if cacheControl != "" {
+		if strings.Contains(cacheControl, "no-store") || strings.Contains(cacheControl, "no-cache") {
+			return
+		}
+	}
+
+	expires := f.res.Header.Get("Expires")
+	if expires != "" {
+		expireTime, err := http.ParseTime(expires)
+		if err == nil && time.Now().After(expireTime) {
+			return
+		}
 	}
 
 	f.cacheable = true
 }
 
+func (f *FSM) SetTTL() {
+	f.ttl = f.res.GetTTL()
+}
+
 func (f *FSM) Cache() {
-	hKey := f.req.HashKey()
-	for name, _ := range f.res.Header {
-		switch name {
-		case "Content-Length", "Transfer-Encoding", "Content-Encoding", "Connection", "Date":
-			f.res.Header.Del(name) // Remove auto-generated headers
-		}
+	if !f.cacheable || f.ttl == 0 {
+		return
 	}
 
-	bytes, err := f.res.serialize()
+	hKey := f.req.HashKey()
+
+	f.res.RemovePayloadHeaders()
+	bytes, err := f.res.Serialize()
 	if err != nil {
 		f.log.Error("Unable to serialize hash" + hKey)
 		return
 	}
 
 	f.log.Info("PUT: " + hKey)
-	f.rds.Set(hKey, bytes)
+	f.rds.Set(hKey, bytes, f.ttl)
 }
 
 func (f *FSM) DeliverCache() {
