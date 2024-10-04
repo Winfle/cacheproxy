@@ -19,16 +19,15 @@ type RedisClient struct {
 }
 
 const CACHE_TTL = 3600 * time.Second
-const REDIS_DB = 5
 
 var ctx context.Context
 var cancelCtx context.CancelFunc
 
-func InitRedisConnection(dns string, ctx context.Context) (*RedisClient, error) {
+func InitRedisConnection(dns string, db int, ctx context.Context) (*RedisClient, error) {
 	options := redis.Options{
 		Addr:     dns,
 		Password: "",
-		DB:       REDIS_DB,
+		DB:       db,
 	}
 
 	if strings.HasPrefix(dns, "tls://") {

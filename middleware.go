@@ -2,7 +2,9 @@ package cacheproxy
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/roadrunner-server/errors"
 	"go.uber.org/zap"
@@ -45,8 +47,20 @@ func (p *Plugin) Init(l Logger, cfg Configurer) error {
 	ctx := context.Background()
 
 	var initErr error
-	p.log.Info("connecting to redis instance: " + p.cfg.RedisAddr)
-	p.rds, initErr = InitRedisConnection(p.cfg.RedisAddr, ctx)
+
+	if p.cfg.DB == "" {
+		p.log.Error("redis db is not set")
+		return errors.E(errors.Disabled)
+	}
+
+	db, err := strconv.Atoi(p.cfg.DB)
+	if err != nil {
+		fmt.Println("error parsing DB number:", err)
+		return errors.E(errors.Disabled)
+	}
+
+	p.log.Info(fmt.Sprintf("connecting to redis: %s[%d]", p.cfg.RedisAddr, db))
+	p.rds, initErr = InitRedisConnection(p.cfg.RedisAddr, db, ctx)
 	if initErr != nil {
 		p.log.Error(initErr.Error())
 		return errors.E(errors.Disabled)
