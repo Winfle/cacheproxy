@@ -19,7 +19,7 @@ type RedisClient struct {
 }
 
 const CACHE_TTL = 3600 * time.Second
-const REDIS_DB = 6
+const REDIS_DB = 5
 
 var ctx context.Context
 var cancelCtx context.CancelFunc
